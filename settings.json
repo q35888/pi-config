@@ -10,6 +10,7 @@
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
     "npm:@juicesharp/rpiv-i18n",
-    "npm:pi-token-speed"
+    "npm:pi-token-speed",
+    "npm:@narumitw/pi-plan-mode"
   ]
 }
