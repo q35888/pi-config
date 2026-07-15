@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pi-browser-mcp — Pi 浏览器能力的独立 MCP server。
+ * agentic-browser-mcp — Pi 浏览器能力的独立 MCP server。
  *
  * 逻辑与 pi 扩展 ~/.pi/agent/extensions/browser-tool.ts 对齐(单一行为基准),
  * 但脱离 pi 进程,以 MCP server 形式供 Codex / pi / 任意 MCP client 连接。
@@ -79,7 +79,7 @@ function spawnStarter() {
   try {
     const child = spawn(
       "bash",
-      ["-c", `nohup ${JSON.stringify(CHROME_STARTER)} > /tmp/pi-browser-mcp-chrome.log 2>&1 &`],
+      ["-c", `nohup ${JSON.stringify(CHROME_STARTER)} > /tmp/agentic-browser-mcp-chrome.log 2>&1 &`],
       { stdio: "ignore" },
     );
     child.on("error", () => {});
@@ -254,7 +254,7 @@ function locateByRole(page, role, name) {
 // ===== 工具工厂:http 模式每个请求 new 一个 server,工具定义集中在此 =====
 
 function createServer() {
-  const server = new McpServer({ name: "pi-browser-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "agentic-browser-mcp", version: "0.1.0" });
 
   // content helpers —— 错误用 isError:true,让 MCP client(Codex)正确识别失败
   const ok = (t) => ({ content: [{ type: "text", text: t }] });
@@ -517,7 +517,7 @@ async function runStdio() {
   // transport 关闭(client 主动断)时也触发退出清理
   t.onclose = () => void shutdown(0);
   await server.connect(t);
-  console.error("[pi-browser-mcp] stdio server ready");
+  console.error("[agentic-browser-mcp] stdio server ready");
 }
 
 async function runHttp(port) {
@@ -554,7 +554,7 @@ async function runHttp(port) {
       await server.connect(transport);
       await transport.handleRequest(req, res, body);
     } catch (e) {
-      console.error("[pi-browser-mcp] http handle error:", e?.message || e);
+      console.error("[agentic-browser-mcp] http handle error:", e?.message || e);
       if (!res.headersSent) {
         res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: String(e?.message || e) }, id: null }));
       }
@@ -567,7 +567,7 @@ async function runHttp(port) {
   });
 
   httpServer.listen(port, "127.0.0.1", () => {
-    console.error(`[pi-browser-mcp] http server ready on http://127.0.0.1:${port}/mcp (stateless)`);
+    console.error(`[agentic-browser-mcp] http server ready on http://127.0.0.1:${port}/mcp (stateless)`);
   });
 }
 
@@ -575,12 +575,12 @@ async function runHttp(port) {
 const { transport, port } = parseArgs();
 if (transport === "http") {
   runHttp(port).catch((e) => {
-    console.error("[pi-browser-mcp] fatal:", e);
+    console.error("[agentic-browser-mcp] fatal:", e);
     process.exit(1);
   });
 } else {
   runStdio().catch((e) => {
-    console.error("[pi-browser-mcp] fatal:", e);
+    console.error("[agentic-browser-mcp] fatal:", e);
     process.exit(1);
   });
 }

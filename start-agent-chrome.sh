@@ -21,4 +21,4 @@ exec /usr/bin/google-chrome-stable \
   "$@"
 # --ozone-platform=wayland:强制走 Wayland。Chrome 启发式选平台时,从后台/非完整
 # GNOME 会话 spawn 会被误判走 X11,导致 Missing X server / Authorization required。
-# 本机是 GNOME Wayland,显式指定更稳(pi 扩展 & pi-browser-mcp 自动拉起都依赖)。
+# 本机是 GNOME Wayland,显式指定更稳(pi 扩展 & agentic-browser-mcp 自动拉起都依赖)。
