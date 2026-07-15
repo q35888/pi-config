@@ -7,8 +7,9 @@
  * 工具:session / navigate / snapshot / click / type / (后续: eval / console /
  *       storage / wait_human / screenshot)
  *
- * 设计:snapshot 返回 Playwright ariaSnapshot() 文本(YAML,带 role+name);
- *       click/type 用 getByRole(role,name) 直接定位,无需中间 ref 层。
+ * 设计:snapshot 注入 JS 扫描可交互元素 + 分配 data-agent-ref 编号(e1/e2/…),
+ *       输出结构化列表(借鉴 Cursor Element Ref 系统);click/type 优先用 ref
+ *       精确定位,role+name 作为 fallback。与 agentic-browser-mcp/index.mjs 同一套逻辑。
  *
  * 详见 ~/docs/superpowers/specs/2026-07-15-pi-browser-extension-design.md
  * 参考样例 examples/extensions/todo.ts (registerTool 写法)。
@@ -203,11 +204,13 @@ const NavigateParams = Type.Object({
   headless: Type.Optional(Type.Boolean()),
 });
 const ClickParams = Type.Object({
-  role: Type.String({ description: "元素 role,见 snapshot 输出(如 link/button/textbox)" }),
+  ref: Type.Optional(Type.String({ description: "snapshot 返回的元素 ref(如 e3),优先使用" })),
+  role: Type.Optional(Type.String({ description: "元素 role(ref 未提供时使用,见 snapshot 输出,如 link/button/textbox)" })),
   name: Type.Optional(Type.String({ description: "元素的可访问名称(accessible name)" })),
 });
 const TypeInputParams = Type.Object({
-  role: Type.String({ description: "元素 role(通常 textbox/searchbox/combobox)" }),
+  ref: Type.Optional(Type.String({ description: "snapshot 返回的元素 ref(如 e3),优先使用" })),
+  role: Type.Optional(Type.String({ description: "元素 role(ref 未提供时使用,通常 textbox/searchbox/combobox)" })),
   name: Type.Optional(Type.String({ description: "输入框的可访问名称" })),
   text: Type.String({ description: "要输入的文本" }),
 });
@@ -293,14 +296,53 @@ export default function (pi: ExtensionAPI) {
     name: "browser_snapshot",
     label: "浏览器快照",
     description:
-      "返回页面 ARIA 无障碍树(YAML 文本,带 role+name)。据此调 click/type 时提供 role+name。",
+      "返回页面可交互元素快照(带 ref 编号)。据此调 click/type 时提供 ref 优先定位。也可用 role+name fallback。",
     executionMode: "sequential",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
       try {
         const s = await ensureSession();
-        let text = await s.page.locator("body").ariaSnapshot();
-        if (text.length > SNAPSHOT_MAX_CHARS) text = text.slice(0, SNAPSHOT_MAX_CHARS) + "\n…[截断,缩小操作范围或滚动后再 snapshot]";
+        // 注入 JS:扫描可交互元素 + 分配 data-agent-ref(借鉴 Cursor Element Ref 系统)
+        // 与 agentic-browser-mcp/index.mjs 同一套逻辑(同一套逻辑的两个宿主)
+        const text = await s.page.evaluate((maxChars: number) => {
+          const sel = [
+            'input','textarea','select','button','a[href]',
+            '[role="button"]','[role="link"]','[role="textbox"]',
+            '[role="checkbox"]','[role="radio"]','[role="combobox"]',
+            '[role="listbox"]','[role="menuitem"]','[role="menuitemcheckbox"]',
+            '[role="menuitemradio"]','[role="option"]','[role="slider"]',
+            '[role="spinbutton"]','[role="switch"]','[role="tab"]',
+            '[role="treeitem"]','[role="searchbox"]',
+            '[contenteditable="true"]','summary',
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(',');
+          // 穿透 open shadow root
+          function deepQuery(root: any, s: string): Element[] {
+            const out: Element[] = [...root.querySelectorAll(s)];
+            for (const el of root.querySelectorAll('*')) {
+              if ((el as any).shadowRoot) out.push(...deepQuery((el as any).shadowRoot, s));
+            }
+            return out;
+          }
+          // 清理旧 ref
+          document.querySelectorAll('[data-agent-ref]').forEach(el => el.removeAttribute('data-agent-ref'));
+          // 过滤隐藏元素:aria-hidden + offsetParent===null(fixed/sticky 豁免)
+          const els = deepQuery(document, sel).filter(el =>
+            el.getAttribute('aria-hidden') !== 'true' &&
+            ((el as HTMLElement).offsetParent !== null || getComputedStyle(el).position === 'fixed' || getComputedStyle(el).position === 'sticky'));
+          const lines = els.map((el, i) => {
+            const ref = 'e' + (i + 1);
+            el.setAttribute('data-agent-ref', ref);
+            const role = el.getAttribute('role') || el.tagName.toLowerCase();
+            const name = (el.getAttribute('aria-label') ||
+              el.textContent?.trim()?.slice(0, 80) ||
+              (el as HTMLInputElement).placeholder || (el as HTMLElement).title || '').slice(0, 80);
+            return `- [ref=${ref}] ${role}${name ? ` "${name}"` : ''}`;
+          });
+          let text = lines.join('\n');
+          if (text.length > maxChars) text = text.slice(0, maxChars) + '\n…[截断,缩小操作范围或滚动后再 snapshot]';
+          return text || '(无可交互元素)';
+        }, SNAPSHOT_MAX_CHARS);
         return { content: [{ type: "text" as const, text }], details: { ok: true } };
       } catch (e: any) {
         const msg = `snapshot 失败: ${e?.message ?? e}`;
@@ -312,17 +354,23 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "browser_click",
     label: "浏览器点击",
-    description: "点击页面元素,用 snapshot 里的 role(+name) 定位。",
+    description: "点击页面元素。优先用 snapshot 返回的 ref 定位(如 e3),也可用 role+name fallback。",
     executionMode: "sequential",
     parameters: ClickParams,
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (!params.ref && !params.role) {
+        return { content: [{ type: "text" as const, text: "点击失败: 必须提供 ref 或 role" }], details: { ok: false, error: "缺少定位参数" } };
+      }
       try {
         const s = await ensureSession();
-        const loc = locateByRole(s.page, params.role, params.name);
+        const loc = params.ref
+          ? s.page.locator(`[data-agent-ref="${params.ref}"]`).first()
+          : locateByRole(s.page, params.role!, params.name);
         await loc.click({ timeout: 10000 });
+        const where = params.ref ? `ref=${params.ref}` : `${params.role}${params.name ? ` "${params.name}"` : ""}`;
         return {
-          content: [{ type: "text" as const, text: `已点击 ${params.role}${params.name ? ` "${params.name}"` : ""}` }],
-          details: { ok: true, role: params.role, name: params.name },
+          content: [{ type: "text" as const, text: `已点击 ${where}` }],
+          details: { ok: true, role: params.role, name: params.name, ref: params.ref },
         };
       } catch (e: any) {
         const msg = `点击失败: ${e?.message ?? e}`;
@@ -334,19 +382,25 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "browser_type",
     label: "浏览器输入",
-    description: "在输入框(role 通常 textbox)输入文本,用 role+name 定位。",
+    description: "在输入框输入文本。优先用 snapshot 返回的 ref 定位(如 e3),也可用 role+name fallback。",
     executionMode: "sequential",
     parameters: TypeInputParams,
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      if (!params.ref && !params.role) {
+        return { content: [{ type: "text" as const, text: "输入失败: 必须提供 ref 或 role" }], details: { ok: false, error: "缺少定位参数" } };
+      }
       try {
         const s = await ensureSession();
-        const loc = locateByRole(s.page, params.role, params.name);
+        const loc = params.ref
+          ? s.page.locator(`[data-agent-ref="${params.ref}"]`).first()
+          : locateByRole(s.page, params.role!, params.name);
         await loc.fill(params.text, { timeout: 10000 });
+        const where = params.ref ? `ref=${params.ref}` : `${params.role}${params.name ? ` "${params.name}"` : ""}`;
         return {
           content: [
-            { type: "text" as const, text: `已在 ${params.role}${params.name ? ` "${params.name}"` : ""} 输入 ${JSON.stringify(params.text)}` },
+            { type: "text" as const, text: `已在 ${where} 输入 ${JSON.stringify(params.text)}` },
           ],
-          details: { ok: true, role: params.role, name: params.name },
+          details: { ok: true, role: params.role, name: params.name, ref: params.ref },
         };
       } catch (e: any) {
         const msg = `输入失败: ${e?.message ?? e}`;

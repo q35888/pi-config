@@ -19,5 +19,6 @@
     "useProviderTokens": true,
     "countStrategy": "direct",
     "endTpsBehavior": "average"
-  }
+  },
+  "shellPath": "D:\\ruanj\\Git\\bin\\bash.exe"
 }
