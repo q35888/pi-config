@@ -1,5 +1,41 @@
 {
   "providers": {
+    "xai-proxy": {
+      "name": "xAI via CLI Proxy (local)",
+      "baseUrl": "http://localhost:8317/v1",
+      "api": "openai-completions",
+      "apiKey": "your-api-key",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "grok-4.5",
+          "name": "Grok 4.5 (local proxy)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 500000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": {
+            "xhigh": null,
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "deepseek"
+          },
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    },
     "zhipu": {
       "name": "Zhipu BigModel (Anthropic-compatible)",
       "baseUrl": "https://open.bigmodel.cn/api/anthropic",

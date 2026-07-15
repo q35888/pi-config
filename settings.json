@@ -1,14 +1,15 @@
 {
   "lastChangelogVersion": "0.80.7",
   "theme": "dark",
-  "defaultProvider": "zhipu",
-  "defaultModel": "glm-5.2-highspeed",
-  "defaultThinkingLevel": "max",
+  "defaultProvider": "xai-proxy",
+  "defaultModel": "grok-4.5",
+  "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-hermes-memory",
     "npm:@tintinweb/pi-subagents",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
-    "npm:@juicesharp/rpiv-i18n"
+    "npm:@juicesharp/rpiv-i18n",
+    "npm:pi-token-speed"
   ]
 }
