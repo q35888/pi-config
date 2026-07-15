@@ -12,5 +12,8 @@
     "npm:@juicesharp/rpiv-i18n",
     "npm:pi-token-speed",
     "npm:@narumitw/pi-plan-mode"
-  ]
+  ],
+  "tokenSpeed": {
+    "display": "full"
+  }
 }
