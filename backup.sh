@@ -58,11 +58,11 @@ else
   echo "   ✓ 无真 key 残留"
 fi
 
-echo "==> git add + commit"
+echo "==> git add + commit + push"
 cd "$DST"
 git add -A
 git commit -m "backup: pi config $(date +%Y-%m-%d_%H:%M)" || echo "   (无变更,跳过 commit)"
+git push 2>&1 | tail -2 || echo "   (push 失败,检查网络/权限)"
 
 echo
-echo "✓ 备份完成。要推送: cd $DST && git push"
-echo "  (脚本未自动 push,你确认脱敏无误后手动 push,或改脚本加 git push)"
+echo "✓ 同步完成(已脱敏 + commit + push)"
