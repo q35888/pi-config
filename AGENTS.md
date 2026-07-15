@@ -46,6 +46,7 @@
 - `~/.codex/config.toml` 的 `[mcp_servers.*]` 段**真相来源是 cc-switch 的 SQLite db**（`~/.cc-switch/cc-switch.db` 的 `mcp_servers` 表），cc-switch 切换 provider 时会用 db 重写 config.toml。**直接改 config.toml 会被覆盖**。
 - 加/改 Codex 的 MCP server 正路：① cc-switch GUI 里加（最稳，它写 db）；② 或停掉 cc-switch（`pkill -x cc-switch`）后用 python 改 db 的 mcp_servers 表（字段：id/name/server_config(JSON)/enabled_codex），改完重启 cc-switch。
 - config.toml 里「不在 db 的」手加段 cc-switch 可能保留也可能吞，别依赖。
+- **删一个 MCP server 必须清三处**（少一处 cc-switch 会从别处恢复，反复“打地鼠”）：① `mcp_servers` 表删记录；② `settings` 表 `common_config_codex` 删段（公共配置模板）；③ **`proxy_live_backup` 表 `config` 字段删段**（完整 config.toml 快照，cc-switch 启动/切换时从它恢复——最易漏）。三处都是 python 改 db（sqlite3 模块，`~/.cc-switch/cc-switch.db`）。改前先 `pkill -x cc-switch`。
 - **坑案例**：改名 `pi-browser`→`agentic-browser` 后只改了 config.toml，cc-switch 切换时把 config 还原成旧名，而旧路径文件已删 → Codex 报 `connection closed`。解法是把 agentic-browser 写进 db。
 - ai-search 协议：Codex 新版用 streamable HTTP 握手，老式 SSE 端点（`/sse`）会报 405。用 stdio（`ai-search-mcp --mode stdio`）避开。
 
