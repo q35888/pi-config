@@ -41,6 +41,14 @@
 - 真 key 永不入 git：`models.json` 的 GLM apiKey、`mcp-servers.json` 的 ai-search key 脱敏；各设备 clone 后手动填回
 - 不同步的（各设备独立）：`chrome-cdp-profile/`（登录态）、`pi-hermes-memory/`（记忆库）、`sessions/`、`extensions/node_modules/`（重装）
 
+## Codex MCP 配置(由 cc-switch 管理)
+
+- `~/.codex/config.toml` 的 `[mcp_servers.*]` 段**真相来源是 cc-switch 的 SQLite db**（`~/.cc-switch/cc-switch.db` 的 `mcp_servers` 表），cc-switch 切换 provider 时会用 db 重写 config.toml。**直接改 config.toml 会被覆盖**。
+- 加/改 Codex 的 MCP server 正路：① cc-switch GUI 里加（最稳，它写 db）；② 或停掉 cc-switch（`pkill -x cc-switch`）后用 python 改 db 的 mcp_servers 表（字段：id/name/server_config(JSON)/enabled_codex），改完重启 cc-switch。
+- config.toml 里「不在 db 的」手加段 cc-switch 可能保留也可能吞，别依赖。
+- **坑案例**：改名 `pi-browser`→`agentic-browser` 后只改了 config.toml，cc-switch 切换时把 config 还原成旧名，而旧路径文件已删 → Codex 报 `connection closed`。解法是把 agentic-browser 写进 db。
+- ai-search 协议：Codex 新版用 streamable HTTP 握手，老式 SSE 端点（`/sse`）会报 405。用 stdio（`ai-search-mcp --mode stdio`）避开。
+
 ## 自建 MCP server
 
 - **agentic-browser-mcp**（`~/.pi/agent/agentic-browser-mcp/index.mjs`）：把 browser-tool 扩展的 11 个浏览器工具抽成独立 MCP server，供 Codex / pi 等 MCP client 连。后端 Playwright 1.61，real 模式 `connectOverCDP` 连专用 Chrome（9222，登录态与 pi 共享），isolated 独立 profile（`bw-mcp-profile`）。传输默认 stdio（Codex 配置 `~/.codex/config.toml [mcp_servers.pi-browser]`），支持 `--transport http --port 9223`（stateless streamable）。与 pi 扩展差异：`wait_human` 去 TUI 退化纯文本往返；错误返回 `isError:true`；session 操作用 `serialize()` 串行锁防并发竞态；`stdin EOF` + `transport.onclose` + `SIGINT`（3s 超时兜底）三重清理防浏览器孤儿。**自动拉起 Chrome**：real 模式先用 `node:net` TCP 探测 9222（不走 HTTP 代理变量），不通就 `spawn bash -c 'nohup start-agent-chrome.sh &'` 自动启动并轮询等待（20s 超时），AI 无需用户手动开 Chrome。pi 端策略=保留原扩展过渡（逻辑对齐但不共用）。**关键坑**：① MCP SDK 1.29 `registerTool(name, config, cb)` 三参数，zod schema 放 `config.inputSchema`（非独立第三参，否则报 `typedHandler is not a function`）；② Node undici `fetch` 读 `http_proxy` 环境变量，探测 127.0.0.1 会被发到代理 7897 误判，改用 `node:net` TCP 探测；③ `spawn(detached:true, stdio:'ignore')` 在本环境 Chrome 起不来，改用 `bash -c 'nohup ... &'`；④ 后台 spawn Chrome 会误走 X11（报 Missing X server / Authorization required），`start-agent-chrome.sh` 加 `--ozone-platform=wayland` 根治。已纳入 `backup.sh` 同步。
