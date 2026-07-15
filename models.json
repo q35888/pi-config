@@ -1,0 +1,40 @@
+{
+  "providers": {
+    "zhipu": {
+      "name": "Zhipu BigModel (Anthropic-compatible)",
+      "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+      "api": "anthropic-messages",
+      "apiKey": "your-api-key",
+      "models": [
+        {
+          "id": "glm-5.2-highspeed",
+          "name": "GLM-5.2 Highspeed",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 65536,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": null,
+            "xhigh": null,
+            "max": "max"
+          },
+          "compat": {
+            "forceAdaptiveThinking": true
+          },
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

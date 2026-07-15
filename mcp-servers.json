@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ai-search": {
+      "url": "http://localhost:11000/sse?key=your-api-key",
+      "description": "AI-powered search"
+    }
+  }
+}

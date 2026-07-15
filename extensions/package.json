@@ -1,0 +1,8 @@
+{
+  "name": "pi-local-extensions",
+  "private": true,
+  "description": "本地 pi 扩展(ctf-mode / glm-footer / browser-tool)",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

@@ -1,0 +1,10 @@
+# 大目录/隐私 —— 不入 git(backup.sh 也不会拷这些,双保险)
+npm/
+bin/
+sessions/
+pi-hermes-memory/
+bw-profile/
+chrome-cdp-profile/
+*.sqlite
+*.log
+*.bak
