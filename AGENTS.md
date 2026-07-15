@@ -47,6 +47,8 @@
 - 加/改 Codex 的 MCP server 正路：① cc-switch GUI 里加（最稳，它写 db）；② 或停掉 cc-switch（`pkill -x cc-switch`）后用 python 改 db 的 mcp_servers 表（字段：id/name/server_config(JSON)/enabled_codex），改完重启 cc-switch。
 - config.toml 里「不在 db 的」手加段 cc-switch 可能保留也可能吞，别依赖。
 - **删一个 MCP server 必须清三处**（少一处 cc-switch 会从别处恢复，反复“打地鼠”）：① `mcp_servers` 表删记录；② `settings` 表 `common_config_codex` 删段（公共配置模板）；③ **`proxy_live_backup` 表 `config` 字段删段**（完整 config.toml 快照，cc-switch 启动/切换时从它恢复——最易漏）。三处都是 python 改 db（sqlite3 模块，`~/.cc-switch/cc-switch.db`）。改前先 `pkill -x cc-switch`。
+- **严重坑：绝对不能清空 `proxy_live_backup` 表！** cc-switch 启动时读它恢复 Live 配置，表空 → cc-switch **启动即卡死/崩溃** → 它的本地代理（127.0.0.1:15721）挂掉 → Codex 请求 502（config.toml 里 `base_url` 指向 15721，代理挂了就全断）。根因不是 GLM 上游，是代理没生效。误删后的恢复：用当前 config.toml + 当前 provider 的 auth（从 `providers` 表 `settings_config.auth` 取）重建一条 `proxy_live_backup` 记录（字段：app_type/original_config(JSON:{auth,config})/backed_up_at），重启 cc-switch 会自愈（日志“Live 配置已恢复”+“已备份 codex Live 配置”）。
+- 改 proxy_live_backup.config 的正则要非常小心：贪婪/边界写错会连删其他 mcp 段。建议用「读取→按段拆分→剔除目标段→重新拼接」而非单行正则。
 - **坑案例**：改名 `pi-browser`→`agentic-browser` 后只改了 config.toml，cc-switch 切换时把 config 还原成旧名，而旧路径文件已删 → Codex 报 `connection closed`。解法是把 agentic-browser 写进 db。
 - ai-search 协议：Codex 新版用 streamable HTTP 握手，老式 SSE 端点（`/sse`）会报 405。用 stdio（`ai-search-mcp --mode stdio`）避开。
 
