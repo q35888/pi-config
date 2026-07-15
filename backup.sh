@@ -48,8 +48,8 @@ cp "$HOME/.pi/patch-scroll.sh" "$DST/patch-scroll.sh" 2>/dev/null || true
 
 echo "==> 确认无真 key 残留(扫描,排除 backup.sh 自身的脱敏代码字面量)"
 # 真正的 GLM key 是 be52dff1 开头的 49 字符串;REDACTED_KEY 作为独立凭据只在 mcp json 里才算
-HITS=$(grep -rnE 'be52d***REDACTED***' "$DST" --include='*.json' --include='*.ts' --include='*.md' 2>/dev/null | grep -v node_modules)
-HITS2=$(grep -rn 'key=REDACTED_KEY' "$DST/mcp-servers.json" 2>/dev/null)
+HITS=$(grep -rnE 'be52d***REDACTED***' "$DST" --include='*.json' --include='*.ts' --include='*.md' 2>/dev/null | grep -v node_modules || true)
+HITS2=$(grep -rn 'key=REDACTED_KEY' "$DST/mcp-servers.json" 2>/dev/null || true)
 if [ -n "$HITS" ] || [ -n "$HITS2" ]; then
   echo "  ⚠️ 真key 残留:"
   echo "$HITS"; echo "$HITS2"
