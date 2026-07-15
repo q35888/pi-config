@@ -49,7 +49,7 @@ echo "==> 同步 ctf-skills(逆向技能库)"
 
 echo "==> 同步补丁脚本"
 cp "$HOME/.pi/patch-scroll.sh" "$DST/patch-scroll.sh" 2>/dev/null || true
-cp "$HOME/.pi/patch-"*-zh.sh "$DST/" 2>/dev/null || true
+cp "$HOME/.pi/agent/patch-"*-zh.sh "$DST/" 2>/dev/null || true
 
 echo "==> 确认无真 key 残留(扫描,排除 backup.sh 自身的脱敏代码字面量)"
 # 真正的 GLM key 是 be52dff1 开头的 49 字符串;REDACTED_KEY 作为独立凭据只在 mcp json 里才算
