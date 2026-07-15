@@ -9,7 +9,7 @@ DST="$(cd "$(dirname "$0")" && pwd)"   # 仓库目录 = 脚本所在目录
 
 echo "==> 同步配置文件(覆盖到仓库)"
 # 小配置文件:直接拷
-for f in settings.json AGENTS.md ctf-mode.json mcp-servers.json models.json start-agent-chrome.sh slash-commands.js.bak auth.json; do
+for f in settings.json AGENTS.md ctf-mode.json ctf-prompt.md mcp-servers.json models.json start-agent-chrome.sh slash-commands.js.bak auth.json; do
   [ -f "$SRC/$f" ] && cp "$SRC/$f" "$DST/$f"
 done
 
