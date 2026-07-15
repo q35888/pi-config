@@ -1,9 +1,9 @@
 {
   "lastChangelogVersion": "0.80.7",
   "theme": "dark",
-  "defaultProvider": "github-copilot",
-  "defaultModel": "gpt-5.6-sol",
-  "defaultThinkingLevel": "xhigh",
+  "defaultProvider": "zhipu",
+  "defaultModel": "glm-5.2-highspeed",
+  "defaultThinkingLevel": "max",
   "packages": [
     "npm:pi-hermes-memory",
     "npm:@tintinweb/pi-subagents",

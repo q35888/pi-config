@@ -19,7 +19,7 @@
  *   action=stop : 关服务器
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox"; // Type 来自 typebox,不是 pi-coding-agent(后者不导出 Type)
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import * as path from "node:path";
