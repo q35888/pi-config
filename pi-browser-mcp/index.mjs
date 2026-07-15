@@ -30,12 +30,16 @@ import { z } from "zod";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
+import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
 
 const AGENT_DIR = join(os.homedir(), ".pi", "agent");
 const ISOLATED_PROFILE = join(AGENT_DIR, "bw-mcp-profile");
 const CDP_ENDPOINT = "http://127.0.0.1:9222";
+const CHROME_STARTER = join(AGENT_DIR, "start-agent-chrome.sh");
 const SNAPSHOT_MAX_CHARS = 12000;
 const SHUTDOWN_TIMEOUT_MS = 3000;
+const CHROME_BOOT_TIMEOUT_MS = 20000; // 自动拉起 Chrome 的最长等待
 
 // ===== 会话管理(与 browser-tool.ts 同构) =====
 // 模块级单例:跨 MCP 请求/transport 共享同一个 Playwright 会话(=同一个 Chrome)。
@@ -47,6 +51,56 @@ function serialize(fn) {
   const run = chain.then(fn, fn); // 无论上一次成败都继续
   chain = run.catch(() => {});
   return run;
+}
+
+// ===== 自动拉起专用 Chrome =====
+// real 模式需要 9222 在听;AI 不该要求用户手动开 Chrome。
+// 探测 9222,不通就 detached spawn start-agent-chrome.sh,轮询等待它起来。
+
+// 探测 9222 是否在听。用 TCP 连接(不走 HTTP 代理环境变量,避免 undici fetch
+// 读 http_proxy 把 127.0.0.1:9222 发给代理 7897 导致误判)。
+function chromeUp() {
+  return new Promise((resolve) => {
+    const sock = createConnection({ host: "127.0.0.1", port: 9222 }, () => {
+      sock.end();
+      resolve(true);
+    });
+    sock.on("error", () => resolve(false));
+    sock.setTimeout(1500, () => {
+      sock.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function spawnStarter() {
+  // 用 nohup + shell 后台(detached:true 在本环境下 Chrome 起不来)。
+  // bash -c "nohup ... &" 让 Chrome 脱离 node 进程独立长驻。
+  try {
+    const child = spawn(
+      "bash",
+      ["-c", `nohup ${JSON.stringify(CHROME_STARTER)} > /tmp/pi-browser-mcp-chrome.log 2>&1 &`],
+      { stdio: "ignore" },
+    );
+    child.on("error", () => {});
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function ensureChromeUp() {
+  if (await chromeUp()) return true;
+  spawnStarter();
+  const deadline = Date.now() + CHROME_BOOT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    if (await chromeUp()) return true;
+  }
+  return false;
 }
 
 function attachConsoleListener(s) {
@@ -106,6 +160,14 @@ async function ensureSession(opts = {}) {
     }
 
     if (profile === "real") {
+      // 自动拉起专用 Chrome(AI 不该要求用户手动开)。
+      // ensureChromeUp 探测 9222,不通就 spawn start-agent-chrome.sh 并轮询等待。
+      const up = await ensureChromeUp();
+      if (!up) {
+        throw new Error(
+          "专用 Chrome(9222)未启动且自动拉起失败。请手动执行 ~/.pi/agent/start-agent-chrome.sh",
+        );
+      }
       const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
       const context = browser.contexts()[0] ?? (await browser.newContext());
       const page = context.pages()[0] ?? (await context.newPage());
