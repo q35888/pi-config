@@ -40,11 +40,16 @@ echo "==> 同步自写扩展(排除 node_modules)"
 mkdir -p "$DST/extensions"
 rsync -a --delete --exclude='node_modules' --exclude='*.log' "$SRC/extensions/" "$DST/extensions/"
 
+echo "==> 同步 agents(自定义 subagent 定义)"
+mkdir -p "$DST/agents"
+rsync -a --delete "$SRC/agents/" "$DST/agents/" 2>/dev/null || true
+
 echo "==> 同步 ctf-skills(逆向技能库)"
 [ -d "$SRC/ctf-skills" ] && rsync -a --delete --exclude='.git' "$SRC/ctf-skills/" "$DST/ctf-skills/"
 
 echo "==> 同步补丁脚本"
 cp "$HOME/.pi/patch-scroll.sh" "$DST/patch-scroll.sh" 2>/dev/null || true
+cp "$HOME/.pi/patch-"*-zh.sh "$DST/" 2>/dev/null || true
 
 echo "==> 确认无真 key 残留(扫描,排除 backup.sh 自身的脱敏代码字面量)"
 # 真正的 GLM key 是 be52dff1 开头的 49 字符串;REDACTED_KEY 作为独立凭据只在 mcp json 里才算
