@@ -481,7 +481,7 @@ export default function (pi: ExtensionAPI) {
         const s = await ensureSession();
         let loc;
         if (params.ref) {
-          const sel = `[data-agent-ref="${CSS.escape(params.ref)}"]`;
+          const sel = `[data-agent-ref="${params.ref}"]`;
           const cnt = await s.page.locator(sel).count();
           if (cnt === 0) return { content: [{ type: "text" as const, text: `点击失败: ref=${params.ref} 未命中（页面可能已变化），请重新 snapshot` }], details: { ok: false, error: "ref 失效" } };
           if (cnt > 1) return { content: [{ type: "text" as const, text: `点击失败: ref=${params.ref} 命中 ${cnt} 个（快照内部错误），请重新 snapshot` }], details: { ok: false, error: "ref 重复" } };
@@ -519,7 +519,7 @@ export default function (pi: ExtensionAPI) {
         const s = await ensureSession();
         let loc;
         if (params.ref) {
-          const sel = `[data-agent-ref="${CSS.escape(params.ref)}"]`;
+          const sel = `[data-agent-ref="${params.ref}"]`;
           const cnt = await s.page.locator(sel).count();
           if (cnt === 0) return { content: [{ type: "text" as const, text: `输入失败: ref=${params.ref} 未命中（页面可能已变化），请重新 snapshot` }], details: { ok: false, error: "ref 失效" } };
           if (cnt > 1) return { content: [{ type: "text" as const, text: `输入失败: ref=${params.ref} 命中 ${cnt} 个（快照内部错误），请重新 snapshot` }], details: { ok: false, error: "ref 重复" } };
