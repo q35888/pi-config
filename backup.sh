@@ -42,7 +42,7 @@ rsync -a --delete --exclude='node_modules' --exclude='*.log' "$SRC/extensions/" 
 
 echo "==> 同步自建 MCP server agentic-browser-mcp(排除 node_modules / 浏览器 profile / 缓存)"
 mkdir -p "$DST/agentic-browser-mcp"
-rsync -a --delete \
+rsync -a --delete --delete-excluded \
   --exclude='node_modules' --exclude='*.log' --exclude='.git' \
   --exclude='*-profile/' --exclude='*-profile-*/' \
   --exclude='bw-shots/' \
