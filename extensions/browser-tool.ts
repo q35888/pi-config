@@ -17,13 +17,23 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { chromium } from "playwright";
 import { Type } from "typebox";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { createConnection } from "node:net";
+import { spawn } from "node:child_process";
 import * as os from "node:os";
 
 const AGENT_DIR = join(os.homedir(), ".pi", "agent");
 const ISOLATED_PROFILE = join(AGENT_DIR, "bw-profile");
 const CDP_ENDPOINT = "http://127.0.0.1:9222";
+const CHROME_STARTER = join(AGENT_DIR, "start-agent-chrome.sh");
+const CDP_PROFILE = join(AGENT_DIR, "chrome-cdp-profile");
+const CHROME_BOOT_TIMEOUT_MS = 20000;
+const IS_WIN = os.platform() === "win32";
+const CHROME_CANDIDATES_WIN = [
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+];
 const WAIT_HUMAN_TIMEOUT_MS = 5 * 60 * 1000;
 const SNAPSHOT_MAX_CHARS = 12000;
 
@@ -42,6 +52,69 @@ interface Session {
 }
 
 let current: Session | null = null;
+
+// —— Chrome 自动拉起(移植自 agentic-browser-mcp)——
+// 探测 9222:用 TCP 连接(不走 HTTP 代理环境变量,避免 undici fetch 读 http_proxy
+// 把 127.0.0.1:9222 发给代理 7897 导致误判)。
+function chromeUp(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = createConnection({ host: "127.0.0.1", port: 9222 }, () => {
+      sock.end();
+      resolve(true);
+    });
+    sock.on("error", () => resolve(false));
+    sock.setTimeout(1500, () => {
+      sock.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function spawnStarter(): boolean {
+  // Windows: 直接 spawn chrome.exe(无 bash/nohup)
+  if (IS_WIN) {
+    try {
+      const exe = CHROME_CANDIDATES_WIN.find((p) => existsSync(p));
+      if (!exe) return false;
+      const child = spawn(
+        exe,
+        ["--remote-debugging-port=9222", `--user-data-dir=${CDP_PROFILE}`, "--no-first-run", "--no-default-browser-check"],
+        { stdio: "ignore", detached: true },
+      );
+      child.on("error", () => {});
+      child.unref();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // Linux: nohup + shell 后台(detached:true 在本环境下 Chrome 起不来)。
+  try {
+    const child = spawn(
+      "bash",
+      ["-c", `nohup ${JSON.stringify(CHROME_STARTER)} > /tmp/pi-browser-chrome.log 2>&1 &`],
+      { stdio: "ignore" },
+    );
+    child.on("error", () => {});
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function ensureChromeUp(): Promise<boolean> {
+  if (await chromeUp()) return true;
+  spawnStarter();
+  const deadline = Date.now() + CHROME_BOOT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    if (await chromeUp()) return true;
+  }
+  return false;
+}
 
 function attachConsoleListener(s: Session): void {
   s.consoleBuffer = [];
@@ -105,6 +178,11 @@ async function ensureSession(opts: {
   }
 
   if (profile === "real") {
+    // 9222 不通就自动拉起专用 Chrome,轮询等待(AI 不该要求用户手动开 Chrome)。
+    const up = await ensureChromeUp();
+    if (!up) {
+      throw new Error("专用 Chrome(9222)未启动且自动拉起失败。请手动执行 ~/.pi/agent/start-agent-chrome.sh");
+    }
     const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
@@ -298,13 +376,16 @@ export default function (pi: ExtensionAPI) {
     description:
       "返回页面可交互元素快照(带 ref 编号)。据此调 click/type 时提供 ref 优先定位。也可用 role+name fallback。",
     executionMode: "sequential",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+    parameters: Type.Object({
+      mode: Type.Optional(Type.Union([Type.Literal("viewport"), Type.Literal("all")], { description: "viewport=只返回当前视口内可交互元素(默认,省 token);all=返回全部(含视口外,需滚动才能操作)" })),
+    }),
+    async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
       try {
         const s = await ensureSession();
+        const mode = params?.mode ?? "viewport";
         // 注入 JS:扫描可交互元素 + 分配 data-agent-ref(借鉴 Cursor Element Ref 系统)
         // 与 agentic-browser-mcp/index.mjs 同一套逻辑(同一套逻辑的两个宿主)
-        const text = await s.page.evaluate((maxChars: number) => {
+        const text = await s.page.evaluate(({ maxChars, mode }: any) => {
           const sel = [
             'input','textarea','select','button','a[href]',
             '[role="button"]','[role="link"]','[role="textbox"]',
@@ -324,25 +405,57 @@ export default function (pi: ExtensionAPI) {
             }
             return out;
           }
-          // 清理旧 ref
-          document.querySelectorAll('[data-agent-ref]').forEach(el => el.removeAttribute('data-agent-ref'));
-          // 过滤隐藏元素:aria-hidden + offsetParent===null(fixed/sticky 豁免)
-          const els = deepQuery(document, sel).filter(el =>
-            el.getAttribute('aria-hidden') !== 'true' &&
-            ((el as HTMLElement).offsetParent !== null || getComputedStyle(el).position === 'fixed' || getComputedStyle(el).position === 'sticky'));
+          // 隐式 ARIA role 映射（让输出的 role 与 Playwright getByRole fallback 一致）
+          function implicitRole(el: Element): string {
+            const r = el.getAttribute('role');
+            if (r) return r;
+            const t = el.tagName.toLowerCase();
+            if (t === 'a' && el.hasAttribute('href')) return 'link';
+            if (t === 'button' || t === 'summary') return 'button';
+            if (t === 'textarea') return 'textbox';
+            if (t === 'input') {
+              const ty = (el.getAttribute('type') || 'text').toLowerCase();
+              return ({checkbox:'checkbox', radio:'radio', search:'searchbox'} as any)[ty] || 'textbox';
+            }
+            if (t === 'select') return 'combobox';
+            return t;
+          }
+          // 清理旧 ref（穿透 shadow root，避免旧 ref 残留与新编号冲突）
+          deepQuery(document, '[data-agent-ref]').forEach(el => el.removeAttribute('data-agent-ref'));
+          // 可见性 + 视口过滤
+          const els = deepQuery(document, sel).filter(el => {
+            if (el.getAttribute('aria-hidden') === 'true') return false;
+            const cs = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            const visible =
+              (el as any).checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true, contentVisibilityAuto: true }) ?? cs.visibility !== 'hidden';
+            if (!(visible && rect.width > 0 && rect.height > 0)) return false;
+            if (mode === 'viewport') {
+              return rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+            }
+            return true;
+          });
           const lines = els.map((el, i) => {
             const ref = 'e' + (i + 1);
             el.setAttribute('data-agent-ref', ref);
-            const role = el.getAttribute('role') || el.tagName.toLowerCase();
+            const role = implicitRole(el);
             const name = (el.getAttribute('aria-label') ||
+              el.getAttribute('aria-labelledby') ||
               el.textContent?.trim()?.slice(0, 80) ||
               (el as HTMLInputElement).placeholder || (el as HTMLElement).title || '').slice(0, 80);
             return `- [ref=${ref}] ${role}${name ? ` "${name}"` : ''}`;
           });
-          let text = lines.join('\n');
-          if (text.length > maxChars) text = text.slice(0, maxChars) + '\n…[截断,缩小操作范围或滚动后再 snapshot]';
+          // 整行截断（不切断单行）+ 统计
+          let text = '', shown = 0;
+          for (const ln of lines) {
+            if (text.length + ln.length + 1 > maxChars) break;
+            text += (text ? '\n' : '') + ln;
+            shown++;
+          }
+          const total = lines.length;
+          if (shown < total) text += `\n…[共 ${total} 项，已返回前 ${shown} 项；mode=all 或滚动后重 snapshot 看更多]`;
           return text || '(无可交互元素)';
-        }, SNAPSHOT_MAX_CHARS);
+        }, { maxChars: SNAPSHOT_MAX_CHARS, mode });
         return { content: [{ type: "text" as const, text }], details: { ok: true } };
       } catch (e: any) {
         const msg = `snapshot 失败: ${e?.message ?? e}`;
@@ -361,11 +474,21 @@ export default function (pi: ExtensionAPI) {
       if (!params.ref && !params.role) {
         return { content: [{ type: "text" as const, text: "点击失败: 必须提供 ref 或 role" }], details: { ok: false, error: "缺少定位参数" } };
       }
+      if (params.ref && !/^e\d+$/.test(params.ref)) {
+        return { content: [{ type: "text" as const, text: `点击失败: ref 必须形如 e3，收到 ${params.ref}` }], details: { ok: false, error: "ref 非法" } };
+      }
       try {
         const s = await ensureSession();
-        const loc = params.ref
-          ? s.page.locator(`[data-agent-ref="${params.ref}"]`).first()
-          : locateByRole(s.page, params.role!, params.name);
+        let loc;
+        if (params.ref) {
+          const sel = `[data-agent-ref="${CSS.escape(params.ref)}"]`;
+          const cnt = await s.page.locator(sel).count();
+          if (cnt === 0) return { content: [{ type: "text" as const, text: `点击失败: ref=${params.ref} 未命中（页面可能已变化），请重新 snapshot` }], details: { ok: false, error: "ref 失效" } };
+          if (cnt > 1) return { content: [{ type: "text" as const, text: `点击失败: ref=${params.ref} 命中 ${cnt} 个（快照内部错误），请重新 snapshot` }], details: { ok: false, error: "ref 重复" } };
+          loc = s.page.locator(sel).first();
+        } else {
+          loc = locateByRole(s.page, params.role!, params.name);
+        }
         await loc.click({ timeout: 10000 });
         const where = params.ref ? `ref=${params.ref}` : `${params.role}${params.name ? ` "${params.name}"` : ""}`;
         return {
@@ -389,11 +512,21 @@ export default function (pi: ExtensionAPI) {
       if (!params.ref && !params.role) {
         return { content: [{ type: "text" as const, text: "输入失败: 必须提供 ref 或 role" }], details: { ok: false, error: "缺少定位参数" } };
       }
+      if (params.ref && !/^e\d+$/.test(params.ref)) {
+        return { content: [{ type: "text" as const, text: `输入失败: ref 必须形如 e3，收到 ${params.ref}` }], details: { ok: false, error: "ref 非法" } };
+      }
       try {
         const s = await ensureSession();
-        const loc = params.ref
-          ? s.page.locator(`[data-agent-ref="${params.ref}"]`).first()
-          : locateByRole(s.page, params.role!, params.name);
+        let loc;
+        if (params.ref) {
+          const sel = `[data-agent-ref="${CSS.escape(params.ref)}"]`;
+          const cnt = await s.page.locator(sel).count();
+          if (cnt === 0) return { content: [{ type: "text" as const, text: `输入失败: ref=${params.ref} 未命中（页面可能已变化），请重新 snapshot` }], details: { ok: false, error: "ref 失效" } };
+          if (cnt > 1) return { content: [{ type: "text" as const, text: `输入失败: ref=${params.ref} 命中 ${cnt} 个（快照内部错误），请重新 snapshot` }], details: { ok: false, error: "ref 重复" } };
+          loc = s.page.locator(sel).first();
+        } else {
+          loc = locateByRole(s.page, params.role!, params.name);
+        }
         await loc.fill(params.text, { timeout: 10000 });
         const where = params.ref ? `ref=${params.ref}` : `${params.role}${params.name ? ` "${params.name}"` : ""}`;
         return {
