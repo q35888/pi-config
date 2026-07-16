@@ -17,6 +17,11 @@
  * scenario_analysis lists fewer than 2 hypotheses. This is the whole point —
  * a reflection that isn't forced to enumerate alternatives is worthless.
  *
+ * i18n fairness: thresholds use code-point count ([...str].length) so CJK
+ * text (higher information density per character) isn't penalized; hypothesis
+ * splitting recognizes both newline-delimited and sentence-punctuation-
+ * delimited (。 ． ! ? .) lists, not just English enumeration.
+ *
  * NOTE (optional enhancement, not enabled by default): auto-trigger.
  *   Hook `tool_result`, and when `event.isError === true`, nudge via
  *   `ctx.ui.setStatus("reflect", "consider reflect()")`. Avoids forcing it
@@ -64,24 +69,40 @@ const ReflectParams = Type.Object({
 	),
 });
 
+/** Strip C0 control chars and DEL (prevents ANSI/control-char injection in TUI rendering). */
+function sanitize(s: string): string {
+	// eslint-disable-next-line no-control-regex
+	return s.replace(/[\x00-\x1f\x7f]/g, "");
+}
+
+/** Code-point length (i18n-fair: a CJK char counts as 1, same as an ASCII char). */
+function cps(s: string): number {
+	return [...s].length;
+}
+
 /**
  * Heuristic: count distinct hypotheses in scenario_analysis.
- * Recognizes enumerated lists (1. 2. / 1) 2) / 1: 2: / - * / a) b)) and
- * hypothesis marker words (maybe/another/Hypothesis/theory/option/...).
+ * Splits on newlines AND sentence-ending punctuation (. 。 ． ! ！ ? ？) so that
+ * CJK text (which often uses 。 not \n between items) is counted fairly.
+ * Then recognizes enumerated list items and hypothesis marker words.
  */
 function countHypotheses(text: string): number {
-	const lines = text
-		.split("\n")
-		.map((l) => l.trim())
-		.filter(Boolean);
-	// Enumerated list items: "1." "2)" "1:" "-" "*" "a)" "b:"
-	const enumerated = lines.filter((l) => /^([0-9]+[.):]|[-*•]|\(?[a-z][.):])\s+/i.test(l)).length;
+	// Split into candidate items by newline or sentence-ending punctuation.
+	const rawItems = text.split(/[\n。．!！?？]+/).map((s) => s.trim()).filter(Boolean);
+	// Enumerated list items: "1." "2)" "1:" "-" "*" "(a)" "(b)" — letter form REQUIRES
+	// parens to avoid matching "M. Smith" or "a. so...". Number form allows . ) :.
+	const enumerated = rawItems.filter((l) => /^([0-9]+[.):]|[-*•]|\([a-z]\))\s+/i.test(l)).length;
 	if (enumerated >= 2) return enumerated;
 	// Hypothesis marker words (covers "Hypothesis 1: ...", "another theory", etc.)
+	// NOTE: "or it/this/that" intentionally EXCLUDED — too common in normal prose,
+	// inflates count on single sentences (e.g. "works or it might not" → false 2).
 	const markers = text.match(
-		/\b(maybe|perhaps|possibly|could be|might|hypoth(?:esis|eses)|theory|theories|option|guess|one (?:reason|explanation|possibility)|another|alternatively|or (?:it|this|that))\b/gi,
+		/\b(maybe|perhaps|possibly|could be|might|hypoth(?:esis|eses)|theory|theories|option|guess|one (?:reason|explanation|possibility)|another|alternatively)\b/gi,
 	);
-	return Math.max(lines.length, markers ? markers.length : 0);
+	// CJK hypothesis markers (也许/可能/另一个/另一种/或者是/或者是/猜测)
+	const cjkMarkers = text.match(/(也许|可能|另一个|另一种|或者是|猜测|或许|说不定)/g);
+	const markerCount = (markers?.length ?? 0) + (cjkMarkers?.length ?? 0);
+	return Math.max(rawItems.length, markerCount);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -113,9 +134,15 @@ export default function (pi: ExtensionAPI) {
 			// Placeholder words that pass a length check but carry no real analysis.
 			// Tokens may repeat separated by whitespace: "n/a n/a", "same same".
 			const PLACEHOLDER = /^(?:\s*(?:n\/a|na|tbd|tba|unknown|none|nothing|see above|same|\.|-|\?))+\s*$/i;
+			// i18n-aware minimum length: CJK text carries ~2-3x the meaning per character,
+			// so it gets a lower threshold. A single global threshold can't be fair to both:
+			// 12 rejects "缓存写满了"(5 CJK, meaningful) ; 6 accepts "it failed"(9 ASCII, too thin).
+			const CJK = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u;
 			for (const field of required) {
 				const val = params[field];
-				if (typeof val !== "string" || val.trim().length < 12 || PLACEHOLDER.test(val.trim())) {
+				const trimmed = typeof val === "string" ? val.trim() : "";
+				const minLen = CJK.test(trimmed) ? 6 : 12;
+				if (typeof val !== "string" || cps(trimmed) < minLen || PLACEHOLDER.test(trimmed)) {
 					throw new Error(
 						`reflect: field "${field}" needs genuine analysis (got: "${val ?? "(empty)"}"). ` +
 							`Reflection forces real thinking; don't bypass it with a placeholder.`,
@@ -128,13 +155,18 @@ export default function (pi: ExtensionAPI) {
 			if (hypothesisCount < 2) {
 				throw new Error(
 					`reflect: scenario_analysis must list at least 2 DISTINCT hypotheses (detected ${hypothesisCount}). ` +
-						`Use numbered items (1. 2. 3.). The point is to push past your first guess. ` +
+						`Use numbered items (1. 2. 3.) or separate sentences. The point is to push past your first guess. ` +
 						`Got: "${params.scenario_analysis.slice(0, 200)}"`,
 				);
 			}
 
 			const details: ReflectDetails = {
-				...params,
+				unexpected_action_outcomes: sanitize(params.unexpected_action_outcomes),
+				relevant_instructions: sanitize(params.relevant_instructions),
+				scenario_analysis: sanitize(params.scenario_analysis),
+				critical_synthesis: sanitize(params.critical_synthesis),
+				next_steps: sanitize(params.next_steps),
+				...(params.tool_call_id ? { tool_call_id: sanitize(params.tool_call_id) } : {}),
 				reflectedAt: new Date().toISOString(),
 			};
 
@@ -142,11 +174,12 @@ export default function (pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						// Neutral confirmation — don't present the heuristic count as a hard fact.
-						text:
-							`Reflection recorded. Hypotheses enumerated, proceeding with the chosen diagnosis.\n\n` +
-							`▸ Synthesis: ${params.critical_synthesis}\n` +
-							`▸ Next: ${params.next_steps}`,
+						// Neutral confirmation only — do NOT echo synthesis/next_steps back.
+						// Those are the model's own words; echoing them reinforces anchoring
+						// (the exact bias this tool exists to counter). Cursor's ReflectSuccess
+						// is empty for the same reason; we add a minimal ack because pi needs
+						// non-empty content here.
+						text: "Reflection recorded. Hypotheses enumerated — proceed with your chosen next action.",
 					},
 				],
 				details,
@@ -160,14 +193,17 @@ export default function (pi: ExtensionAPI) {
 			return new Text(`${label} ${theme.fg("dim", preview)}`, 0, 0);
 		},
 
-		renderResult(result, { expanded }, theme, _context) {
+		renderResult(result, { expanded }, theme, context) {
 			const details = result.details as ReflectDetails | undefined;
 			const text0 = result.content?.[0];
-			// When execute throws, details is undefined and isError is set on the result.
-			// Distinguish rejection (red ✗) from success (green ✓) so the TUI isn't misleading.
+			// When execute throws, details is undefined and the error flag is set.
+			// isError lives on `context` (verified via pi source: read.ts uses context.isError;
+			// extensions.md L2137 lists it in the context object). Fall back to result.isError
+			// for safety across render paths.
+			const isError = context?.isError ?? result.isError;
 			if (!details) {
 				const msg = text0?.type === "text" ? text0.text : "";
-				const prefix = result.isError
+				const prefix = isError
 					? theme.fg("error", "✗ Reflect rejected: ")
 					: theme.fg("success", "✓ ");
 				return new Text(prefix + theme.fg("muted", msg), 0, 0);
