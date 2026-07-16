@@ -87,8 +87,10 @@ function cps(s: string): number {
  * Then recognizes enumerated list items and hypothesis marker words.
  */
 function countHypotheses(text: string): number {
-	// Split into candidate items by newline or sentence-ending punctuation.
-	const rawItems = text.split(/[\n。．!！?？]+/).map((s) => s.trim()).filter(Boolean);
+	// Split into candidate items by newline or sentence-ending punctuation
+	// (. 。 ． ! ！ ? ？). ASCII "." is required for English ("A. B. C."), accepting
+	// the rare false-split on decimals like "3.14" (lenient direction, harmless here).
+	const rawItems = text.split(/[\n。．!！?？.]+/).map((s) => s.trim()).filter(Boolean);
 	// Enumerated list items: "1." "2)" "1:" "-" "*" "(a)" "(b)" — letter form REQUIRES
 	// parens to avoid matching "M. Smith" or "a. so...". Number form allows . ) :.
 	const enumerated = rawItems.filter((l) => /^([0-9]+[.):]|[-*•]|\([a-z]\))\s+/i.test(l)).length;
@@ -96,12 +98,13 @@ function countHypotheses(text: string): number {
 	// Hypothesis marker words (covers "Hypothesis 1: ...", "another theory", etc.)
 	// NOTE: "or it/this/that" intentionally EXCLUDED — too common in normal prose,
 	// inflates count on single sentences (e.g. "works or it might not" → false 2).
-	const markers = text.match(
-		/\b(maybe|perhaps|possibly|could be|might|hypoth(?:esis|eses)|theory|theories|option|guess|one (?:reason|explanation|possibility)|another|alternatively)\b/gi,
-	);
-	// CJK hypothesis markers (也许/可能/另一个/另一种/或者是/或者是/猜测)
-	const cjkMarkers = text.match(/(也许|可能|另一个|另一种|或者是|猜测|或许|说不定)/g);
-	const markerCount = (markers?.length ?? 0) + (cjkMarkers?.length ?? 0);
+	const MARKER = /\b(maybe|perhaps|possibly|could be|might|hypoth(?:esis|eses)|theory|theories|option|guess|one (?:reason|explanation|possibility)|another|alternatively)\b/gi;
+	// CJK hypothesis markers (也许/可能/另一个/另一种/或者是/猜测/或许/说不定)
+	const CJK_MARKER = /(也许|可能|另一个|另一种|或者是|猜测|或许|说不定)/g;
+	// Count SENTENCES containing a marker, not total marker hits — otherwise a single
+	// stuffed sentence ("It maybe could possibly might alternatively be X") falsely
+	// reads as 5 hypotheses. Each rawItem contributes at most 1 to the count.
+	const markerCount = rawItems.filter((s) => MARKER.test(s) || CJK_MARKER.test(s)).length;
 	return Math.max(rawItems.length, markerCount);
 }
 
@@ -187,20 +190,24 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme, _context) {
-			const a = args as Partial<ReflectDetails>;
+			const a = args as { next_steps?: string };
 			const label = theme.fg("toolTitle", theme.bold("reflect"));
 			const preview = a.next_steps ? a.next_steps.slice(0, 60) : "(diagnosing)";
 			return new Text(`${label} ${theme.fg("dim", preview)}`, 0, 0);
 		},
 
-		renderResult(result, { expanded }, theme, context) {
+		renderResult(result, { expanded, isPartial }, theme, context) {
+			// execute is atomic (never calls onUpdate), so isPartial should never be true here.
+			// Guard anyway: a future change adding onUpdate would otherwise render raw partial state.
+			if (isPartial) {
+				return new Text(theme.fg("warning", "○ Reflecting..."), 0, 0);
+			}
 			const details = result.details as ReflectDetails | undefined;
 			const text0 = result.content?.[0];
-			// When execute throws, details is undefined and the error flag is set.
-			// isError lives on `context` (verified via pi source: read.ts uses context.isError;
-			// extensions.md L2137 lists it in the context object). Fall back to result.isError
-			// for safety across render paths.
-			const isError = context?.isError ?? result.isError;
+			// isError is authoritative on `context` (ToolRenderContext.isError is a required boolean,
+			// verified in pi-agent-core types.d.ts L323 + extensions/types.d.ts L306). AgentToolResult
+			// has NO isError field, so do not read result.isError.
+			const isError = context.isError;
 			if (!details) {
 				const msg = text0?.type === "text" ? text0.text : "";
 				const prefix = isError
@@ -223,13 +230,14 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 
-			// Expanded: full 5-axis cognitive chain.
+			// Expanded: full 5-axis cognitive chain. Truncate bodies to avoid a huge
+			// scenario_analysis blowing up the TUI row (collapsed view already uses slice(0,80)).
 			const section = (title: string, body: string) =>
 				theme.fg("accent", title) +
 				" " +
 				theme.fg("borderMuted", "─") +
 				"\n" +
-				theme.fg("muted", body);
+				theme.fg("muted", body.slice(0, 2000));
 
 			const full =
 				theme.fg("success", "✓ Reflection") +
