@@ -12,14 +12,12 @@
     "npm:@juicesharp/rpiv-i18n",
     "npm:pi-token-speed",
     "npm:@narumitw/pi-plan-mode",
-    "npm:pi-claude-style-tools",
-    "npm:pi-lens"
+    "npm:pi-claude-style-tools"
   ],
   "tokenSpeed": {
     "display": "full",
     "useProviderTokens": true,
     "countStrategy": "direct",
     "endTpsBehavior": "average"
-  },
-  "shellPath": "D:\\ruanj\\Git\\bin\\bash.exe"
+  }
 }

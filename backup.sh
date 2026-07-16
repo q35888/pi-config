@@ -40,9 +40,13 @@ echo "==> 同步自写扩展(排除 node_modules)"
 mkdir -p "$DST/extensions"
 rsync -a --delete --exclude='node_modules' --exclude='*.log' "$SRC/extensions/" "$DST/extensions/"
 
-echo "==> 同步自建 MCP server agentic-browser-mcp(排除 node_modules)"
+echo "==> 同步自建 MCP server agentic-browser-mcp(排除 node_modules / 浏览器 profile / 缓存)"
 mkdir -p "$DST/agentic-browser-mcp"
-rsync -a --delete --exclude='node_modules' --exclude='*.log' "$SRC/agentic-browser-mcp/" "$DST/agentic-browser-mcp/" 2>/dev/null || true
+rsync -a --delete \
+  --exclude='node_modules' --exclude='*.log' --exclude='.git' \
+  --exclude='*-profile/' --exclude='*-profile-*/' \
+  --exclude='bw-shots/' \
+  "$SRC/agentic-browser-mcp/" "$DST/agentic-browser-mcp/" 2>/dev/null || true
 
 echo "==> 同步 agents(自定义 subagent 定义)"
 mkdir -p "$DST/agents"

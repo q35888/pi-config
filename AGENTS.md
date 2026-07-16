@@ -1,19 +1,4 @@
 # 全局规范 (pi)
-## 运行环境（CRITICAL — 先读这段）
-
-**本机是 Windows，shell 是 Git Bash (MINGW64)，不是 WSL，不是 Linux，不是 macOS。**
-
-- `uname` 返回 `MINGW64_NT-...`——这是 MSYS2/MinGW 环境，不是真正的 Linux
-- **不存在的命令**（别用，会直接报 command not found）：
-  - `apt-get` / `apt` / `yum` / `pacman` → 包管理用 `winget` 或 `choco`
-  - `systemctl` / `service` → 没有服务管理；进程用 `taskkill //F //PID <pid>`（PowerShell）或直接 Ctrl+C
-  - `pkill` → 用 `taskkill`（PowerShell）替代；Git Bash 里 **没有 pkill**
-  - `lsblk` / `fdisk` → 用 PowerShell 的 `Get-Disk` / `Get-Partition`
-- **路径**：Windows 反斜杠 `C:\Users\zhi`，Git Bash 里 `~` = `C:\Users\zhi`（`/c/Users/zhi`）
-- **路径分隔**：Git Bash 接受 `/c/Users/zhi` 和 `C:/Users/zhi`；`C:\Users\zhi` 需要引号包裹或双反斜杠
-- 以下 AGENTS.md 中出现的 Linux 风格命令（`pkill -x cc-switch`、`--ozone-platform=wayland`、X11 等）是**特定场景（远程服务器 / 其他设备 / 参考用）**，**不要在当前 Git Bash 里照搬**
-- 安装软件：`npm install`、`pip install`、`winget install <pkg>`、`choco install <pkg>`
-
 
 ## 交互
 
