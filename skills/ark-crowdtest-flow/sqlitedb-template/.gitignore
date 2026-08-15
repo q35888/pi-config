@@ -1,0 +1,22 @@
+# Byte-compiled / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test / coverage caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local virtualenv
+.venv/
+venv/
